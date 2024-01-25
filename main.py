@@ -5,8 +5,28 @@ from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import PolynomialFeatures
+from lightgbm import LGBMRegressor
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.svm import LinearSVR
+
+def compute_mse(model, X, y_true, name):
+    y_pred = model.predict(X)
+    mse = mean_squared_error(y_true, y_pred)
+    print(f'Mean Squared Error for {name}: {mse}')
+def build_evaluate_fn(X_train, y_train, X_test, y_test):
+    def evaluate(model):
+        train_score = model.score(X_train, y_train)
+        test_score = model.score(X_test, y_test)
+
+        print("Train Score:", train_score)
+        print("Test Score:", test_score)
+        print()
+
+        compute_mse(model, X_train, y_train, 'training set')
+        compute_mse(model, X_test, y_test, 'test set')
+
+    return evaluate
 
 # Load data from CSV into Pandas DataFrame
 data = pd.read_csv('csv_wholesale_X_X.csv')
@@ -34,12 +54,22 @@ y = data['Price']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=10)
 
 # Create a pipeline with Polynomial Regression
-degree = 8  # You can adjust the degree of the polynomial
-alpha = 0.4  # Regularization strength, you can adjust this
-model = make_pipeline(PolynomialFeatures(degree), Ridge(alpha=alpha))
+degree = 4  # You can adjust the degree of the polynomial
+alpha = 0.5  # Regularization strength, you can adjust this
+linear_poly = make_pipeline(PolynomialFeatures(degree), Ridge(alpha=alpha))
+svm = LinearSVR()
+gbr = LGBMRegressor(n_estimators=1000)
+
 
 # Train the model on the training set
-model.fit(X_train, y_train)
+linear_poly.fit(X_train, y_train)
+svm.fit(X_train, y_train)
+gbr.fit(X_train, y_train)
+
+evaluate = build_evaluate_fn(X_train, y_train, X_test, y_test)
+evaluate(linear_poly)
+evaluate(svm)
+evaluate(gbr)
 
 # Choose a specific day for prediction (e.g., 22/01)
 day_to_predict = 23
@@ -55,21 +85,29 @@ new_data = pd.DataFrame({
     'Minute': [0, 30] * 24
 })
 
-predictions = model.predict(X_test)
+lp_predictions = linear_poly.predict(X_test)
+svm_predictions = svm.predict(X_test)
+gbr_predictions = gbr.predict(X_test)
 
 # Evaluate model using mean squared error and R-squared on the test set
-mse = mean_squared_error(y_test, predictions)
-r2 = r2_score(y_test, predictions)
+# mse = mean_squared_error(y_test, predictions)
+lp_r2 = r2_score(y_test, lp_predictions)
+svm_r2 = r2_score(y_test, svm_predictions)
+gbr_r2 = r2_score(y_test, gbr_predictions)
+
+#print(f'Mean squared error: {mse}')
+print(f'LP R squared error: {lp_r2}')
+print(f'SVM R squared error: {svm_r2}')
+print(f'GBR R squared error: {gbr_r2}')
 
 # Predict prices for the chosen day
-day_predictions = model.predict(new_data[['Day', 'Month', 'Year', 'Hour', 'Minute']])
+lp_day_predictions = linear_poly.predict(new_data[['Day', 'Month', 'Year', 'Hour', 'Minute']])
+svm_day_predictions = svm.predict(new_data[['Day', 'Month', 'Year', 'Hour', 'Minute']])
+gbr_day_predictions = gbr.predict(new_data)
 
 # Display predicted prices for each row
 # for index, prediction in enumerate(predictions_new_data):
 #    print(f'Predicted Price for Hour {new_data["Hour"].iloc[index]}:{new_data["Minute"].iloc[index]}: {prediction}')
-
-# Add the predictions as a new column in new_data
-new_data['Predicted_Price'] = day_predictions
 
 # Filter the actual data for the chosen day
 actual_data_for_chosen_day = data[(data['Day'] == day_to_predict) & (data['Month'] == month_to_predict)]
@@ -85,7 +123,11 @@ for year, group in actual_data_for_chosen_day.groupby('Year'):
     plt.plot(group['Hour'] + group['Minute'] / 60, group['Price'], linestyle='-', marker='o', label=f'Actual Prices - {year}')
 
 # Plot the predicted prices for the chosen day
-plt.plot(new_data['Hour'] + new_data['Minute'] / 60, day_predictions, linestyle='-', marker='o', color='b', label='Predicted Prices')
+plt.plot(new_data['Hour'] + new_data['Minute'] / 60, lp_day_predictions, linestyle='-', marker='o', color='b', label='Linear Poly Predicted Prices')
+plt.plot(new_data['Hour'] + new_data['Minute'] / 60, svm_day_predictions, linestyle='-', marker='o', color='m', label='SVM Predicted Prices')
+plt.plot(new_data['Hour'] + new_data['Minute'] / 60, gbr_day_predictions, linestyle='-', marker='o', color='k', label='GBR Predicted Prices')
+
+
 
 plt.title(f'Electricity Price Prediction - {day_to_predict}/{month_to_predict}/{year_to_predict}')
 plt.xlabel('Hour')
