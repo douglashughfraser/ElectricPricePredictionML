@@ -46,12 +46,21 @@ data = data.drop(['Date', 'Time'], axis=1)
 # Display the first few rows of the DataFrame
 print(data.head())
 
+# Exclude data from the year 2024 from the training set
+X_train = data[data['Year'] < 2024][['Day', 'Month', 'Year', 'Hour', 'Minute']]
+y_train = data[data['Year'] < 2024]['Price']
+
+# Create test set for the year 2024
+X_test = data[data['Year'] == 2024][['Day', 'Month', 'Year', 'Hour', 'Minute']]
+y_test = data[data['Year'] == 2024]['Price']
+
 # Create training set
-X = data[['Day', 'Month', 'Year', 'Hour', 'Minute']]
-y = data['Price']
+#X = data[['Day', 'Month', 'Year', 'Hour', 'Minute']]
+#y = data['Price']
 
 # Split the data into training and test sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=10)
+# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=10)
+
 
 # Create a pipeline with Polynomial Regression
 degree = 4  # You can adjust the degree of the polynomial
