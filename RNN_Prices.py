@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Bidirectional, LSTM, Dense
 import matplotlib.pyplot as plt
 
@@ -24,30 +26,61 @@ day_to_predict = most_recent_date.day
 month_to_predict = most_recent_date.month
 year_to_predict = most_recent_date.year
 
-# Create training set using data up to the most recent date
-X = data[data['Date'] < most_recent_date][['Day', 'Month', 'Year', 'DayOfYear', 'Hour', 'Minute', 'Price']].values
+# Remove unnecessary columns from dataframe
+data.drop(['Date', 'Time'], axis=1)
 
-# Normalize the data
-scaler = MinMaxScaler()
-X_scaled = scaler.fit_transform(X)
+# Create training and test sets.
+# Features are stored in X, these are Day, Month, Year, DayOfYear, Hour and Minute
+# Targets are stored in y, here I'm using historical price data.
+X = data[data['Date'] < most_recent_date][['Day', 'Month', 'Year', 'DayOfYear', 'Hour', 'Minute']].values
+y = data[data['Date'] < most_recent_date][['Price']].values
 
-# Prepare sequences for time series prediction
-sequence_length = 24  # Number of time steps to consider for prediction
-X_sequences, y = [], []
-for i in range(len(X_scaled) - sequence_length):
-    X_sequences.append(X_scaled[i:i + sequence_length, :-1])  # Exclude the last column (Price) from features
-    y.append(X_scaled[i + sequence_length, -1])  # Use the last column (Price) as the target variable
+# Normalize the data to a scale between 0 and 1 (good for neural networks)
+feature_scaler = MinMaxScaler()
+target_scaler = MinMaxScaler()
 
-X_sequences, y = np.array(X_sequences), np.array(y)
+X = feature_scaler.fit_transform(X)
+y = target_scaler.fit_transform(y)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Split time-series data into individual day segments
+time_intervals_in_day = 48  # Number of time steps to consider for prediction
+X_sequences = []
+y = []
+
+# Group data by date
+grouped_data = X_train.groupby(['Day', 'Month', 'Year', 'DayOfYear'])
+
+for name, group in grouped_data:
+    # Sort the group by time
+    sorted_group = group.sort_values(by=['Hour', 'Minute'])
+
+    # Extract features and target
+    features = sorted_group[['Day', 'Month', 'Year', 'DayOfYear', 'Hour', 'Minute']].values
+    prices = sorted_group['Price'].values
+
+    # Ensure the group has enough data points
+    if len(sorted_group) == time_intervals_in_day:
+        for i in range(len(sorted_group) - time_intervals_in_day + 1):
+            X_sequences.append(features[i:i + time_intervals_in_day])
+            y.append(prices[i + time_intervals_in_day - 1])
+    else:
+        print(f'Not enough entries for Date: {name[0]}/{name[1]}/{name[2]}, Entries: {len(sorted_group)}')
+
+X_sequences = np.array(X_sequences)
+y = np.array(y)
 
 # Build the Bi-LSTM model
 model = Sequential()
 model.add(Bidirectional(LSTM(50, activation='relu'), input_shape=(X_sequences.shape[1], X_sequences.shape[2])))
 model.add(Dense(1))
-model.compile(optimizer='adam', loss='mse')
+model.compile(optimizer='adam', loss='mse', metrics='accuracy')
 
 # Train the model
 model.fit(X_sequences, y, epochs=5, batch_size=32, validation_split=0.2)
+
+predictions = model.predict(X_test)
 
 # Initialize an empty DataFrame to store predictions
 predictions_df = pd.DataFrame(columns=['Hour', 'Minute', 'Predicted_Price'])
@@ -59,9 +92,8 @@ for hour in range(22):
                                 (data['Month'] == month_to_predict) & (data['Year'] == year_to_predict) &
                                 (data['Hour'] == hour) & (data['Minute'] == minute)]
 
-        current_data_features = current_data[['Day', 'Month', 'Year', 'DayOfYear', 'Hour', 'Minute']].values.reshape(1,
-                                                                                                                     sequence_length,
-                                                                                                                     -1)
+        current_data_features = current_data[['Day', 'Month', 'Year', 'DayOfYear', 'Hour', 'Minute']].values
+
         current_data_features_scaled = scaler.transform(current_data_features[0])
 
         # Predict the next price
